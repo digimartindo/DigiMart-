@@ -17,6 +17,9 @@ import {
   CheckCircle2,
   AlertCircle,
   UserCheck,
+  Cloud,
+  CloudUpload,
+  CloudDownload,
 } from 'lucide-react';
 import { Console, RentalHistoryItem } from '../types';
 import { formatRupiah, formatDuration, formatDateTime } from '../utils/formatters';
@@ -38,6 +41,21 @@ interface ReportsAndSettingsProps {
   onImportBackup: (file: File) => void;
   backupNotification: string | null;
   onViewReceipt: (receipt: RentalHistoryItem) => void;
+  cloudBackups: CloudBackupMeta[];
+  cloudLoading: boolean;
+  cloudBusy: boolean;
+  onCloudBackup: (label: string) => void;
+  onCloudRestore: (id: number) => void;
+  onCloudDelete: (id: number) => void;
+  onRefreshCloud: () => void;
+}
+
+export interface CloudBackupMeta {
+  id: number;
+  label: string;
+  created_by: string;
+  created_at: string;
+  size_bytes?: number;
 }
 
 export default function ReportsAndSettings({
@@ -57,10 +75,19 @@ export default function ReportsAndSettings({
   onImportBackup,
   backupNotification,
   onViewReceipt,
+  cloudBackups,
+  cloudLoading,
+  cloudBusy,
+  onCloudBackup,
+  onCloudRestore,
+  onCloudDelete,
+  onRefreshCloud,
 }: ReportsAndSettingsProps) {
   const [filter, setFilter] = useState('all');
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cloudLabel, setCloudLabel] = useState('');
+  const [restoreConfirmId, setRestoreConfirmId] = useState<number | null>(null);
 
   // Operator Edit Form
   const [operatorNameInput, setOperatorNameInput] = useState(operator.name);
@@ -486,6 +513,122 @@ export default function ReportsAndSettings({
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Shared Cloud Backup Card (visible to all users/devices) */}
+          <div className="rounded-3xl border border-blue-200 bg-blue-50/40 p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-blue-100 pb-3">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900">
+                <Cloud size={16} className="text-blue-600" />
+                <span>Cadangan Cloud (Semua Perangkat)</span>
+              </div>
+              <button
+                onClick={onRefreshCloud}
+                disabled={cloudLoading || cloudBusy}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-blue-700 border border-blue-200 hover:bg-blue-100 transition disabled:opacity-50"
+                title="Muat ulang daftar cadangan"
+              >
+                <RotateCcw size={11} className={cloudLoading ? 'animate-spin' : ''} />
+                Segarkan
+              </button>
+            </div>
+
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Simpan cadangan ke server. Semua perangkat/kasir yang membuka aplikasi ini akan melihat dan bisa memulihkan cadangan yang sama.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={cloudLabel}
+                onChange={(e) => setCloudLabel(e.target.value)}
+                placeholder="Nama cadangan (opsional)"
+                className="flex-1 min-w-0 rounded-xl border border-zinc-200 px-3 py-2 text-xs bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  onCloudBackup(cloudLabel.trim());
+                  setCloudLabel('');
+                }}
+                disabled={cloudBusy}
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 transition shadow-xs disabled:opacity-50 whitespace-nowrap"
+                title="Cadangkan data saat ini ke cloud"
+              >
+                <CloudUpload size={14} />
+                <span>Cadangkan</span>
+              </button>
+            </div>
+
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {cloudLoading ? (
+                <div className="py-6 text-center text-[11px] text-zinc-500">Memuat cadangan cloud...</div>
+              ) : cloudBackups.length === 0 ? (
+                <div className="py-6 text-center text-[11px] text-zinc-500">
+                  Belum ada cadangan cloud. Buat cadangan pertama Anda.
+                </div>
+              ) : (
+                cloudBackups.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-zinc-200 bg-white"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-zinc-900 text-xs truncate">{b.label}</div>
+                      <div className="text-[10px] text-zinc-500">
+                        {formatDateTime(new Date(b.created_at).getTime())} • oleh {b.created_by}
+                        {typeof b.size_bytes === 'number' && (
+                          <span> • {(b.size_bytes / 1024).toFixed(1)} KB</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {restoreConfirmId === b.id ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              onCloudRestore(b.id);
+                              setRestoreConfirmId(null);
+                            }}
+                            disabled={cloudBusy}
+                            className="rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            Pulihkan?
+                          </button>
+                          <button
+                            onClick={() => setRestoreConfirmId(null)}
+                            className="rounded-lg border border-zinc-200 px-2 py-1 text-[10px] text-zinc-600"
+                          >
+                            Batal
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setRestoreConfirmId(b.id)}
+                            disabled={cloudBusy}
+                            className="p-1.5 rounded-lg border border-zinc-200 bg-zinc-50 hover:bg-emerald-50 hover:text-emerald-600 transition disabled:opacity-50"
+                            title="Pulihkan data dari cadangan ini"
+                          >
+                            <CloudDownload size={14} />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => onCloudDelete(b.id)}
+                              disabled={cloudBusy}
+                              className="p-1.5 rounded-lg border border-zinc-200 bg-zinc-50 hover:bg-rose-50 hover:text-rose-600 transition disabled:opacity-50"
+                              title="Hapus cadangan"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
