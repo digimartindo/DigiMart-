@@ -35,6 +35,14 @@ import {
   DEFAULT_PACKAGE_RATE,
 } from './data/initialData';
 
+interface CloudBackupMeta {
+  id: number;
+  label: string;
+  created_by: string;
+  created_at: string;
+  size_bytes?: number;
+}
+
 export default function App() {
   // Local Operator Profile (Local & Offline Ready)
   const [operator, setOperator] = useState<{ name: string; role: 'admin' | 'kasir' }>(() => {
@@ -43,6 +51,16 @@ export default function App() {
   });
 
   const [backupNotification, setBackupNotification] = useState<string | null>(null);
+
+  // Shared cloud backups (visible to all users/devices)
+  const [cloudBackups, setCloudBackups] = useState<CloudBackupMeta[]>([]);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudBusy, setCloudBusy] = useState(false);
+
+  const notify = (msg: string) => {
+    setBackupNotification(msg);
+    setTimeout(() => setBackupNotification(null), 4000);
+  };
 
   useEffect(() => {
     localStorage.setItem('local-operator', JSON.stringify(operator));
@@ -408,6 +426,102 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  // ---- Shared Cloud Backup (Neon) ----
+  const buildSnapshot = () => ({
+    version: '1.0',
+    exportedAt: new Date().toISOString(),
+    consoles,
+    rates,
+    packageRate,
+    foodItems,
+    foodSales,
+    rentalHistory,
+    loyaltyGamers,
+    tournamentMatches,
+  });
+
+  const applySnapshot = (data: any) => {
+    if (data.consoles) setConsoles(data.consoles);
+    if (data.rates) setRates(data.rates);
+    if (data.packageRate) setPackageRate(data.packageRate);
+    if (data.foodItems) setFoodItems(data.foodItems);
+    if (data.foodSales) setFoodSales(data.foodSales);
+    if (data.rentalHistory) setRentalHistory(data.rentalHistory);
+    if (data.loyaltyGamers) setLoyaltyGamers(data.loyaltyGamers);
+    if (data.tournamentMatches) setTournamentMatches(data.tournamentMatches);
+  };
+
+  const fetchCloudBackups = async () => {
+    setCloudLoading(true);
+    try {
+      const res = await fetch('/api/backups');
+      if (!res.ok) throw new Error('gagal memuat');
+      const list = await res.json();
+      setCloudBackups(Array.isArray(list) ? list : []);
+    } catch {
+      notify('Gagal memuat daftar cadangan cloud.');
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  // Load the shared cloud backup list on first mount
+  useEffect(() => {
+    fetchCloudBackups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCloudBackup = async (label: string) => {
+    setCloudBusy(true);
+    try {
+      const res = await fetch('/api/backups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: label || `Cadangan ${new Date().toLocaleString('id-ID')}`,
+          data: buildSnapshot(),
+          createdBy: operator.name,
+        }),
+      });
+      if (!res.ok) throw new Error('gagal');
+      await fetchCloudBackups();
+      notify('Data berhasil dicadangkan ke cloud & bisa dilihat semua perangkat!');
+    } catch {
+      notify('Gagal mencadangkan ke cloud. Periksa koneksi internet.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudRestore = async (id: number) => {
+    setCloudBusy(true);
+    try {
+      const res = await fetch(`/api/backups?id=${id}`);
+      if (!res.ok) throw new Error('gagal');
+      const row = await res.json();
+      applySnapshot(row.data);
+      notify('Data berhasil dipulihkan dari cadangan cloud!');
+    } catch {
+      notify('Gagal memulihkan data dari cloud.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudDelete = async (id: number) => {
+    setCloudBusy(true);
+    try {
+      const res = await fetch(`/api/backups?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('gagal');
+      await fetchCloudBackups();
+      notify('Cadangan cloud dihapus.');
+    } catch {
+      notify('Gagal menghapus cadangan cloud.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
   const activeRentalsCount = consoles.filter((c) => c.status === 'rented').length;
   const activeStartConsole = consoles.find((c) => c.id === startRentalConsoleId);
   const activeOrderConsole = consoles.find((c) => c.id === tableOrderConsoleId);
@@ -534,6 +648,13 @@ export default function App() {
             onExportBackup={handleExportBackup}
             onImportBackup={handleImportBackup}
             backupNotification={backupNotification}
+            cloudBackups={cloudBackups}
+            cloudLoading={cloudLoading}
+            cloudBusy={cloudBusy}
+            onCloudBackup={handleCloudBackup}
+            onCloudRestore={handleCloudRestore}
+            onCloudDelete={handleCloudDelete}
+            onRefreshCloud={fetchCloudBackups}
             onViewReceipt={(receipt) => {
               setLastReceiptToPrint(receipt);
               setActiveStoryReceipt(receipt);
